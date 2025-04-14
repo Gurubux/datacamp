@@ -52,3 +52,159 @@ logging.set_verbosity(logging.WARNING)
 4. Summarize and analyze a car review
 	You'll need to load a summarization LLM and pass it the last car review in the dataset to generate a summary of approximately 50-55 tokens. You'll analyze if there are any potential biases in the generated summary text by calculating the maximum toxicity and regard metrics.
 		 -Formatting metric inputs as a list
+
+
+
+```python
+# Import necessary packages
+import pandas as pd
+import torch
+from sklearn.metrics import accuracy_score, f1_score
+from transformers import pipeline
+from transformers import logging
+logging.set_verbosity(logging.WARNING)
+
+"""
+STEP 1
+Classify car reviews
+You'll need to load a sentiment analysis LLM to classify the sentiment of each review in the dataset into POSITIVE or NEGATIVE, and utilize the real labels to calculate the accuracy and F1 score of predictions.
+
+
+Choosing which model to use
+Label mapping for metrics computation
+"""
+sentiment_model = pipeline("sentiment-analysis")
+df = pd.read_csv("data/car_reviews.csv", sep=";")
+texts = df["Review"].tolist()
+true_labels = df["Class"].map({"POSITIVE": 1, "NEGATIVE": 0}).tolist()
+predicted_labels = sentiment_model(texts)
+predictions = [1 if pred["label"] == "POSITIVE" else 0 for pred in predicted_labels]
+accuracy_result = accuracy_score(true_labels, predictions)
+f1_result = f1_score(true_labels, predictions)
+print(accuracy_result, f1_result)
+
+"""
+STEP 2
+Translate a car review
+You'll need to load an English-to-Spanish translation LLM (for instance "Helsinki-NLP/opus-mt-en-es") to translate part of the first car review in the dataset into Spanish, and use the reference translations provided in a separate file to calculate the BLEU score.
+
+
+Telling the translator LLM when to stop
+Preprocessing loaded reference translations
+"""
+from transformers import MarianMTModel, MarianTokenizer
+import nltk
+nltk.download('punkt')
+from nltk.tokenize import sent_tokenize
+model_name = "Helsinki-NLP/opus-mt-en-es"
+tokenizer = MarianTokenizer.from_pretrained(model_name)
+model = MarianMTModel.from_pretrained(model_name)
+first_review = df["Review"].iloc[0]
+print(first_review)
+nltk.download('punkt')
+nltk.download('punkt_tab')
+sent_tokenize(first_review)
+first_two_sentences = " ".join(sent_tokenize(first_review)[:2])
+print(first_two_sentences)
+inputs = tokenizer(first_two_sentences, return_tensors="pt", truncation=True, max_length=512)
+print(inputs)
+translated_tokens = model.generate(inputs["input_ids"], max_length=512, num_beams=4, early_stopping=True)
+print(translated_tokens)
+translated_review = tokenizer.decode(translated_tokens[0], skip_special_tokens=True)
+print(translated_review)
+with open("data/reference_translations.txt", "r", encoding="utf-8") as f:
+    reference_texts = f.readlines()
+reference_sentences = [line.strip().split() for line in reference_texts if line.strip()]
+print(reference_sentences)
+reference = reference_sentences[0]  # Assuming 1-to-1 mapping with first review
+print(reference)
+candidate = translated_review.split()
+print(candidate)
+from evaluate import load
+bleu = load("bleu")
+
+candidate = "Estoy muy satisfecho con mi Nissan NV SL 2014. Uso esta camioneta para mis entregas de negocios y uso personal."
+reference = "Estoy muy satisfecho con mi Nissan NV SL 2014. Utilizo esta camioneta para mis entregas comerciales y uso personal."
+# ✅ CORRECTLY formatted input
+# predictions = [candidate]
+# references = [reference]  # NOT nested!
+
+bleu_score = bleu.compute(predictions=[candidate], references=[reference])
+print(bleu_score)
+
+"""
+STEP 3
+Ask a question about a car review
+You'll need to load a pre-trained LLM for extractive QA, such as "deepset/minilm-uncased-squad2", that takes two inputs (question and context) and extracts an answer directly from the context.
+
+
+Output post-processing when using auto classes
+"""
+from transformers import AutoTokenizer, AutoModelForQuestionAnswering
+import torch
+
+qa_model_name = "deepset/minilm-uncased-squad2"
+tokenizer = AutoTokenizer.from_pretrained(qa_model_name)
+model = AutoModelForQuestionAnswering.from_pretrained(qa_model_name)
+
+question = "What did he like about the brand?"
+context = df["Review"].iloc[1]  # 2nd review
+
+inputs = tokenizer(question, context, return_tensors="pt", truncation=True)
+with torch.no_grad():
+    outputs = model(**inputs)
+
+start_logits = outputs.start_logits
+end_logits = outputs.end_logits
+
+start_idx = torch.argmax(start_logits)
+end_idx = torch.argmax(end_logits) + 1  # Include end token
+
+answer_tokens = inputs["input_ids"][0][start_idx:end_idx]
+answer = tokenizer.decode(answer_tokens, skip_special_tokens=True)
+print(answer)
+
+
+"""
+STEP 4
+Summarize and analyze a car review
+You'll need to load a summarization LLM and pass it the last car review in the dataset to generate a summary of approximately 50-55 tokens. You'll analyze if there are any potential biases in the generated summary text by calculating the maximum toxicity and regard metrics.
+
+
+Formatting metric inputs as a list
+When you extract the text of a single output generated by an LLM and pass it as an argument to the compute() method of the evaluate library, some metrics often require encapsulating that single string into a 1-element list.
+For instance, use predictions=[summarized_text], with summarized_text as the string variable containing the extracted summarized text from the LLM output.
+"""
+
+from transformers import pipeline
+summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+last_review = df["Review"].iloc[-1]
+summary_output = summarizer(last_review, max_length=55, min_length=50, do_sample=False)
+summarized_text = summary_output[0]['summary_text']
+texts = [summarized_text]
+tox_model = pipeline("text-classification", model="unitary/toxic-bert", top_k=None)
+toxicity_scores = tox_model(texts)
+
+# Get max toxicity score for the summary
+tox_values = [score['score'] for score in toxicity_scores[0] if score['label'] == 'toxic']
+max_toxicity = max(tox_values) if tox_values else 0.0
+print(texts, tox_values, max_toxicity)
+
+import evaluate
+toxicity = evaluate.load("toxicity")
+regard = evaluate.load("regard")
+texts = [summarized_text]  # Ensure it's a list
+toxicity_result = toxicity.compute(predictions=texts)
+regard_result = regard.compute(data=texts)
+print(toxicity_result,regard_result)
+print(regard_result["regard"])
+texts = [summarized_text]
+toxicity_result = toxicity.compute(predictions=texts)
+regard_result = regard.compute(data=texts)
+max_toxicity = max(toxicity_result["toxicity"])
+max_regard = max(score_dict["score"] for score_dict in regard_result["regard"][0])
+top_regard_label = max(regard_result["regard"][0], key=lambda x: x["score"])["label"]
+print("Max toxicity:", max_toxicity)
+print("Max regard score:", max_regard)
+print("Top regard label:", top_regard_label)
+```
