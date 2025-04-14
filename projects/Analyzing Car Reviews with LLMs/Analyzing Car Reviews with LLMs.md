@@ -208,3 +208,379 @@ print("Max toxicity:", max_toxicity)
 print("Max regard score:", max_regard)
 print("Top regard label:", top_regard_label)
 ```
+
+```python
+inputs = tokenizer(first_two_sentences, return_tensors="pt", truncation=True, max_length=512)
+print(inputs)
+translated_tokens = model.generate(inputs["input_ids"], max_length=512, num_beams=4, early_stopping=True)
+print(translated_tokens)
+translated_review = tokenizer.decode(translated_tokens[0], skip_special_tokens=True)
+print(translated_review)
+
+bleu_score = bleu.compute(predictions=[candidate], references=[reference])
+print(bleu_score)
+
+
+from transformers import AutoTokenizer, AutoModelForQuestionAnswering
+import torch
+
+qa_model_name = "deepset/minilm-uncased-squad2"
+tokenizer = AutoTokenizer.from_pretrained(qa_model_name)
+model = AutoModelForQuestionAnswering.from_pretrained(qa_model_name)
+
+question = "What did he like about the brand?"
+context = df["Review"].iloc[1]  # 2nd review
+
+inputs = tokenizer(question, context, return_tensors="pt", truncation=True)
+with torch.no_grad():
+    outputs = model(**inputs)
+
+start_logits = outputs.start_logits
+end_logits = outputs.end_logits
+
+start_idx = torch.argmax(start_logits)
+end_idx = torch.argmax(end_logits) + 1  # Include end token
+
+answer_tokens = inputs["input_ids"][0][start_idx:end_idx]
+answer = tokenizer.decode(answer_tokens, skip_special_tokens=True)
+print(answer)
+
+```
+
+---
+
+## 🧠 LLM Concept: Translating Text Using a Pretrained Model
+
+### 📌 What the Code Does
+
+```python
+inputs = tokenizer(first_two_sentences, return_tensors="pt", truncation=True, max_length=512)
+translated_tokens = model.generate(inputs["input_ids"], max_length=512, num_beams=4, early_stopping=True)
+translated_review = tokenizer.decode(translated_tokens[0], skip_special_tokens=True)
+```
+
+This script performs **text translation** (or similar sequence-to-sequence generation) in three main steps:
+
+1. **Tokenization**  
+   ```python
+   inputs = tokenizer(first_two_sentences, return_tensors="pt", truncation=True, max_length=512)
+   ```
+   - Converts the input text (`first_two_sentences`) into token IDs.
+   - Returns PyTorch tensors (`return_tensors="pt"`).
+   - Ensures the input is within the model's maximum length (`truncation=True, max_length=512`).
+
+2. **Text Generation**  
+   ```python
+   translated_tokens = model.generate(inputs["input_ids"], max_length=512, num_beams=4, early_stopping=True)
+   ```
+   - Uses the model to generate output tokens based on the input.
+   - Applies **beam search** (4 beams) for higher-quality translation.
+   - Stops generation early if all beams finish (`early_stopping=True`).
+
+3. **Decoding Output Tokens**  
+   ```python
+   translated_review = tokenizer.decode(translated_tokens[0], skip_special_tokens=True)
+   ```
+   - Converts the generated token IDs back into human-readable text.
+   - Skips special tokens like `<pad>` or `<eos>`.
+
+---
+
+### 🔧 Other Possible Parameters & Uses
+
+#### `tokenizer()`
+- `padding=True`: Pads sequences to the same length.
+- `return_attention_mask=True`: Returns attention mask alongside input IDs.
+- `add_special_tokens=True`: Ensures BOS/CLS/SEP tokens are added.
+
+#### `model.generate()`
+- `do_sample=True`: Enables **random sampling** instead of greedy/beam search.
+- `temperature=0.7`: Controls randomness in sampling.
+- `top_k=50` / `top_p=0.9`: Nucleus/top-k sampling for diverse generation.
+- `repetition_penalty=1.2`: Penalizes repetition.
+- `no_repeat_ngram_size=3`: Prevents repeating 3-grams.
+
+#### Usage Variants
+- Translation (e.g., English → French)
+- Summarization
+- Question Answering (with input formatting)
+- Text Simplification or Paraphrasing
+
+---
+
+### 🧠 Final Important Bits to Remember
+
+- **Tokenization & Decoding are model-specific** – always use the same tokenizer as the model.
+- **Beam Search vs Sampling**:
+  - Beam = more deterministic, higher quality.
+  - Sampling = more diversity.
+- `early_stopping=True` helps avoid unnecessarily long outputs.
+- Always `skip_special_tokens=True` when decoding unless debugging.
+
+---
+
+The **BLEU score computation** code using 🤗 **Evaluate** library. This is widely used in evaluating **machine translation** and **text generation quality**.
+
+## 🧠 LLM Concept: BLEU Score for Evaluating Text Generation
+
+### 📌 What the Code Does
+
+```python
+bleu_score = bleu.compute(predictions=[candidate], references=[reference])
+print(bleu_score)
+```
+
+This script evaluates how close a **machine-generated sentence (`candidate`)** is to a **reference sentence** (or sentences) using the **BLEU (Bilingual Evaluation Understudy)** metric.
+
+- `predictions=[candidate]`: A list of generated texts (your model's output).
+- `references=[reference]`: A list of **lists** of reference texts. Each `reference[i]` can be a list of multiple acceptable reference sentences for the same prediction.
+
+Example:
+```python
+candidate = "The cat is on the mat"
+reference = ["There is a cat on the mat"]
+```
+
+Output:
+```python
+{'bleu': 0.4671, 'precisions': [...], 'brevity_penalty': ..., 'length_ratio': ..., 'translation_length': ..., 'reference_length': ...}
+```
+
+---
+
+### 🔧 Other Possible Parameters & Uses
+
+The `.compute()` method accepts:
+
+- `predictions`: `List[str]` – Generated texts.
+- `references`: `List[List[str]]` – Multiple references for each prediction allowed.
+- `max_order` (default=4): N-gram precision up to n=4.
+- `smooth` (default=False): Whether to apply **smoothing** to avoid BLEU=0 when no n-gram overlap exists.
+
+✅ **Example with smoothing**:
+```python
+bleu.compute(predictions=[candidate], references=[[reference1, reference2]], smooth=True)
+```
+
+#### Additional Use Cases:
+- Translation model evaluation
+- Paraphrase generation assessment
+- Summarization evaluation (though **ROUGE** is more common there)
+
+---
+
+### 🧠 Final Important Bits to Remember
+
+- BLEU is based on **n-gram overlap** between prediction and reference.
+- It **penalizes short predictions** using the **brevity penalty**.
+- BLEU scores range from **0 to 1**, where 1 is a perfect match.
+- It's **not sensitive to semantics** – it just looks at token overlaps.
+- For better evaluation of **semantic similarity**, combine BLEU with:
+  - **ROUGE** (recall-focused)
+  - **METEOR** (semantic match + synonym-aware)
+  - **BERTScore** (embedding-based)
+
+---
+## 🧠 LLM Concept: Extractive Question Answering Using Transformers
+
+### 📌 What the Code Does
+
+```python
+from transformers import AutoTokenizer, AutoModelForQuestionAnswering
+import torch
+```
+
+This sets up the **Hugging Face Transformers** library and PyTorch for an extractive QA task.
+
+---
+
+```python
+qa_model_name = "deepset/minilm-uncased-squad2"
+tokenizer = AutoTokenizer.from_pretrained(qa_model_name)
+model = AutoModelForQuestionAnswering.from_pretrained(qa_model_name)
+```
+
+- Loads the **MiniLM model fine-tuned on SQuAD2** (supports unanswerable questions).
+- The `AutoTokenizer` tokenizes the question + context.
+- The `AutoModelForQuestionAnswering` predicts the **start and end positions** of the answer.
+
+---
+
+```python
+question = "What did he like about the brand?"
+context = df["Review"].iloc[1]  # 2nd review
+```
+
+You define:
+- A `question` string.
+- A `context` string (a passage from which the answer is to be extracted).
+
+---
+
+```python
+inputs = tokenizer(question, context, return_tensors="pt", truncation=True)
+with torch.no_grad():
+    outputs = model(**inputs)
+```
+
+- Tokenizes the input for model consumption (`return_tensors="pt"` = PyTorch).
+- `truncation=True`: Ensures input fits model’s token limit.
+- `torch.no_grad()`: Runs inference without tracking gradients (saves memory).
+
+---
+
+```python
+start_logits = outputs.start_logits
+end_logits = outputs.end_logits
+start_idx = torch.argmax(start_logits)
+end_idx = torch.argmax(end_logits) + 1
+```
+
+- `start_logits` and `end_logits` are vectors indicating where the answer likely starts and ends.
+- `argmax` finds the most likely start and end token positions.
+
+---
+
+```python
+answer_tokens = inputs["input_ids"][0][start_idx:end_idx]
+answer = tokenizer.decode(answer_tokens, skip_special_tokens=True)
+print(answer)
+```
+
+- Extracts the tokens between `start_idx` and `end_idx`.
+- Decodes them into a human-readable answer, skipping special tokens like `[CLS]` or `[SEP]`.
+
+---
+
+### 🔧 Other Possible Parameters & Uses
+
+#### `tokenizer()` options:
+- `padding=True`: Pads input to max length for batch processing.
+- `max_length=n`: Explicit length control.
+- `stride=n`: Useful for long contexts (sliding window).
+- `return_offsets_mapping=True`: Useful for mapping token spans back to the original context text.
+
+#### Applications beyond FAQ:
+- Customer support chatbots  
+- Medical document QA  
+- Legal document analysis  
+- Closed-book QA in search engines
+
+#### Swap the model for different use cases:
+- `"distilbert-base-cased-distilled-squad"`: lightweight  
+- `"bert-large-uncased-whole-word-masking-finetuned-squad"`: more powerful  
+- `"timpal0l/mdeberta-v3-base-squad2"`: multilingual
+
+---
+
+### 🧠 Final Important Bits to Remember
+
+- 🧩 **Start/End logits** → `argmax` gives answer span  
+- 🧠 **No training needed** – zero-shot inference on any context  
+- 🔍 Fine-tuning possible with custom Q&A datasets  
+- ❗ **SQuAD2 models can return empty string** if no answer is found (watch for that)
+
+---
+
+## 🧠 LLM Concept: Summarization + Bias Detection Using Toxicity and Regard Metrics
+
+### 📌 What the Code Does
+
+```python
+from transformers import pipeline
+summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+```
+- Loads a **pretrained summarization model** (`facebook/bart-large-cnn`) via Hugging Face's `pipeline`.
+- This model is fine-tuned to produce fluent, abstractive summaries.
+
+---
+
+```python
+last_review = df["Review"].iloc[-1]
+summary_output = summarizer(last_review, max_length=55, min_length=50, do_sample=False)
+summarized_text = summary_output[0]['summary_text']
+```
+
+- Grabs the **last review** from a DataFrame column (`Review`).
+- Summarizes it using **greedy decoding** (`do_sample=False`) with token constraints:
+  - `max_length=55`, `min_length=50`
+- Extracts the **summary text** from the model output dictionary.
+
+---
+
+```python
+texts = [summarized_text]
+tox_model = pipeline("text-classification", model="unitary/toxic-bert", top_k=None)
+toxicity_scores = tox_model(texts)
+```
+
+- Wraps the `summarized_text` in a list, required for batch inputs.
+- Uses a **toxicity classification model** (`unitary/toxic-bert`) to score the text for different toxic labels (e.g., toxic, severe toxic, threat, etc.).
+
+---
+
+```python
+tox_values = [score['score'] for score in toxicity_scores[0] if score['label'] == 'toxic']
+max_toxicity = max(tox_values) if tox_values else 0.0
+```
+
+- Extracts the **toxicity score** from the output.
+- Calculates the **maximum toxicity** score (or sets to 0.0 if no 'toxic' label found).
+
+---
+
+```python
+import evaluate
+toxicity = evaluate.load("toxicity")
+regard = evaluate.load("regard")
+texts = [summarized_text]
+toxicity_result = toxicity.compute(predictions=texts)
+regard_result = regard.compute(data=texts)
+```
+
+- Loads two evaluation metrics from Hugging Face's `evaluate` library:
+  - `toxicity` (based on the Detoxify model)
+  - `regard` (measures perceived respectfulness or bias)
+- Both metrics expect `texts` to be a **list of strings**.
+
+---
+
+```python
+max_toxicity = max(toxicity_result["toxicity"])
+max_regard = max(score_dict["score"] for score_dict in regard_result["regard"][0])
+top_regard_label = max(regard_result["regard"][0], key=lambda x: x["score"])["label"]
+```
+
+- Computes the **highest toxicity score** from the `toxicity` result.
+- Determines the **max regard score** and **its associated label** (e.g., "positive", "neutral", "negative") to assess **bias in perception**.
+
+---
+
+### 🔧 Other Parameters & Use Cases
+
+#### 🔍 `summarizer()` options
+- `do_sample=True`: Use **sampling-based decoding** (adds variation).
+- `top_k`, `top_p`, `temperature`: Control randomness when sampling.
+- `truncation=True`: Enforce model’s max token limit on long reviews.
+- `num_beams=n`: Use **beam search** instead of greedy decoding.
+
+#### ⚖️ `toxicity` and `regard` metrics
+- Both are pretrained and can be used for **bias audits** in:
+  - Generated content (summaries, captions)
+  - LLM chat replies
+  - Social media datasets
+
+#### ✅ Alternatives
+- `perspective-api`: External service for fine-grained bias detection.
+- `bertscore`: For semantic similarity, but not bias.
+
+---
+
+### 🧠 Final Important Bits to Remember
+
+- Wrap text in a **list** when using `evaluate.compute(predictions=...)`.
+- `toxicity` score ranges from **0.0 (harmless)** to **1.0 (very toxic)**.
+- `regard` gives **label + score** to indicate perceived attitude toward a demographic (e.g., women, men, immigrants).
+- This pipeline helps you **audition summaries** for unintended **bias or harmful language**.
+
+---
