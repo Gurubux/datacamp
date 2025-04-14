@@ -590,5 +590,3 @@ top_regard_label = max(regard_result["regard"][0], key=lambda x: x["score"])["la
 - This pipeline helps you **audition summaries** for unintended **bias or harmful language**.
 
 ---
-=======
->>>>>>> 99e1528af1db9ca981de6d1a5a8756786c34bd65
