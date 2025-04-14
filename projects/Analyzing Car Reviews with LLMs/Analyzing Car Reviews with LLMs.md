@@ -35,3 +35,20 @@ import torch
 from transformers import logging
 logging.set_verbosity(logging.WARNING)
 ```
+
+--- 
+### How to approach the project
+1. Classify car reviews
+	You'll need to load a sentiment analysis LLM to classify the sentiment of each review in the dataset into POSITIVE or NEGATIVE, and utilize the real labels to calculate the accuracy and F1 score of predictions.
+		- Choosing which model to use
+		- Label mapping for metrics computation
+2. Translate a car review
+	You'll need to load an English-to-Spanish translation LLM (for instance "Helsinki-NLP/opus-mt-en-es") to translate part of the first car review in the dataset into Spanish, and use the reference translations provided in a separate file to calculate the BLEU score.
+		- Telling the translator LLM when to stop
+		- Preprocessing loaded reference translations
+3. Ask a question about a car review
+	You'll need to load a pre-trained LLM for extractive QA, such as "deepset/minilm-uncased-squad2", that takes two inputs (question and context) and extracts an answer directly from the context.
+		- Output post-processing when using auto classes
+4. Summarize and analyze a car review
+	You'll need to load a summarization LLM and pass it the last car review in the dataset to generate a summary of approximately 50-55 tokens. You'll analyze if there are any potential biases in the generated summary text by calculating the maximum toxicity and regard metrics.
+		 -Formatting metric inputs as a list
